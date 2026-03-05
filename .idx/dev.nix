@@ -63,8 +63,7 @@
       # =========================
       if [ ! -f "$SEED_ISO" ] || [ ! -s "$SEED_ISO" ]; then
         echo "Creating cloud-init seed ISO..."
-
-        python3 << 'PYEOF'
+        cat > /tmp/make_seed.py << 'PYEOF'
 import struct, os, time
 
 def pad(data, size):
@@ -72,15 +71,6 @@ def pad(data, size):
 
 def make_iso(output_path, files):
     SECTOR = 2048
-    # files: list of (name, content_bytes)
-
-    # Layout:
-    # Sector 0-15: system area
-    # Sector 16: PVD
-    # Sector 17: Volume Descriptor Set Terminator
-    # Sector 18: Root directory
-    # Sector 19+: File data
-
     file_start_sector = 19
     file_sectors = []
     offset = file_start_sector
@@ -88,24 +78,17 @@ def make_iso(output_path, files):
         file_sectors.append(offset)
         sectors_needed = (len(content) + SECTOR - 1) // SECTOR
         offset += sectors_needed
-
     total_sectors = offset
 
     def lsb_msb_16(n):
         return struct.pack('<H', n) + struct.pack('>H', n)
-
     def lsb_msb_32(n):
         return struct.pack('<I', n) + struct.pack('>I', n)
-
     def date_field(t=None):
         if t is None:
             t = time.gmtime()
-        return bytes([
-            t.tm_year - 1900,
-            t.tm_mon, t.tm_mday,
-            t.tm_hour, t.tm_min, t.tm_sec, 0
-        ])
-
+        return bytes([t.tm_year-1900, t.tm_mon, t.tm_mday,
+                      t.tm_hour, t.tm_min, t.tm_sec, 0])
     def dir_record(name_bytes, sector, size, is_dir=False):
         flags = 0x02 if is_dir else 0x00
         name_len = len(name_bytes)
@@ -123,67 +106,56 @@ def make_iso(output_path, files):
             rec += b'\x00'
         return rec
 
-    # Build root directory sector
     root_dir = b''
-    root_dir += dir_record(b'\x00', 18, SECTOR, is_dir=True)  # .
-    root_dir += dir_record(b'\x01', 18, SECTOR, is_dir=True)  # ..
+    root_dir += dir_record(b'\x00', 18, SECTOR, is_dir=True)
+    root_dir += dir_record(b'\x01', 18, SECTOR, is_dir=True)
     for i, (name, content) in enumerate(files):
         root_dir += dir_record(name.upper().encode(), file_sectors[i], len(content))
     root_dir_padded = pad(root_dir, SECTOR)
 
-    # Build PVD
     pvd = b'\x01'
     pvd += b'CD001\x01\x00'
-    pvd += b' ' * 32  # system id
-    pvd += pad(b'CIDATA', 32)  # volume id
+    pvd += b' ' * 32
+    pvd += pad(b'CIDATA', 32)
     pvd += b'\x00' * 8
     pvd += lsb_msb_32(total_sectors)
     pvd += b'\x00' * 32
-    pvd += lsb_msb_16(1)  # volume set size
-    pvd += lsb_msb_16(1)  # volume sequence number
+    pvd += lsb_msb_16(1)
+    pvd += lsb_msb_16(1)
     pvd += lsb_msb_16(SECTOR)
-    pvd += lsb_msb_32(total_sectors * SECTOR)  # path table size approx
-    pvd += struct.pack('<I', 0)  # L path table
+    pvd += lsb_msb_32(total_sectors * SECTOR)
     pvd += struct.pack('<I', 0)
-    pvd += struct.pack('>I', 0)  # M path table
+    pvd += struct.pack('<I', 0)
     pvd += struct.pack('>I', 0)
-    pvd += dir_record(b'\x00', 18, SECTOR, is_dir=True)  # root dir record (34 bytes)
-    pvd += b' ' * 128  # volume set id
-    pvd += b' ' * 128  # publisher
-    pvd += b' ' * 128  # data preparer
-    pvd += b' ' * 128  # application
-    pvd += b' ' * 37   # copyright
-    pvd += b' ' * 37   # abstract
-    pvd += b' ' * 37   # bibliographic
-    pvd += b'0001010000000000\x00'  # creation date
-    pvd += b'0000000000000000\x00'  # modification
-    pvd += b'0000000000000000\x00'  # expiration
-    pvd += b'0000000000000000\x00'  # effective
+    pvd += struct.pack('>I', 0)
+    pvd += dir_record(b'\x00', 18, SECTOR, is_dir=True)
+    pvd += b' ' * 128
+    pvd += b' ' * 128
+    pvd += b' ' * 128
+    pvd += b' ' * 128
+    pvd += b' ' * 37
+    pvd += b' ' * 37
+    pvd += b' ' * 37
+    pvd += b'0001010000000000\x00'
+    pvd += b'0000000000000000\x00'
+    pvd += b'0000000000000000\x00'
+    pvd += b'0000000000000000\x00'
     pvd += b'\x01\x00'
     pvd = pad(pvd, SECTOR)
 
-    # Terminator
     term = pad(b'\xff' + b'CD001\x01', SECTOR)
 
     with open(output_path, 'wb') as f:
-        # System area (sectors 0-15)
         f.write(b'\x00' * (16 * SECTOR))
-        # PVD (sector 16)
         f.write(pvd)
-        # Terminator (sector 17)
         f.write(term)
-        # Root directory (sector 18)
         f.write(root_dir_padded)
-        # File data
         for name, content in files:
             sectors_needed = (len(content) + SECTOR - 1) // SECTOR
             f.write(pad(content, sectors_needed * SECTOR))
-
     print(f"ISO created: {output_path} ({os.path.getsize(output_path)} bytes)")
 
-meta_data = b"""instance-id: ubuntu-qemu-01
-local-hostname: ubuntu-vm
-"""
+meta_data = b"instance-id: ubuntu-qemu-01\nlocal-hostname: ubuntu-vm\n"
 
 user_data = b"""#cloud-config
 users:
@@ -191,18 +163,13 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: false
-    passwd: ""
-
 chpasswd:
   expire: false
   list:
     - ubuntu:ubuntu
-
 ssh_pwauth: true
-
 package_update: true
 package_upgrade: false
-
 packages:
   - xfce4
   - xfce4-goodies
@@ -214,54 +181,30 @@ packages:
   - htop
   - nano
   - net-tools
-
 runcmd:
   - passwd -d ubuntu
   - mkdir -p /home/ubuntu/.vnc
-  - echo "ubuntu" | x11vnc -storepasswd - /home/ubuntu/.vnc/passwd
+  - bash -c 'echo ubuntu | x11vnc -storepasswd ubuntu /home/ubuntu/.vnc/passwd'
   - chown -R ubuntu:ubuntu /home/ubuntu/.vnc
-  - |
-    cat > /home/ubuntu/start-vnc.sh << 'VNCEOF'
-    #!/bin/bash
-    export DISPLAY=:0
-    Xvfb :0 -screen 0 1280x800x24 &
-    sleep 2
-    startxfce4 &
-    sleep 3
-    x11vnc -display :0 -rfbport 5900 -passwd ubuntu -forever -shared -bg
-    VNCEOF
+  - bash -c 'echo "#!/bin/bash\nexport DISPLAY=:0\nXvfb :0 -screen 0 1280x800x24 &\nsleep 2\nstartxfce4 &\nsleep 3\nx11vnc -display :0 -rfbport 5900 -passwd ubuntu -forever -shared -bg" > /home/ubuntu/start-vnc.sh'
   - chmod +x /home/ubuntu/start-vnc.sh
   - chown ubuntu:ubuntu /home/ubuntu/start-vnc.sh
-  - |
-    cat > /etc/systemd/system/xvnc.service << 'SVCEOF'
-    [Unit]
-    Description=XFCE + x11vnc Desktop
-    After=network.target
-    [Service]
-    User=ubuntu
-    Environment=DISPLAY=:0
-    ExecStartPre=/bin/bash -c "Xvfb :0 -screen 0 1280x800x24 &"
-    ExecStartPre=/bin/sleep 2
-    ExecStart=/bin/bash -c "startxfce4 & sleep 3 && x11vnc -display :0 -rfbport 5900 -passwd ubuntu -forever -shared"
-    Restart=on-failure
-    [Install]
-    WantedBy=multi-user.target
-    SVCEOF
+  - bash -c 'printf "[Unit]\nDescription=XFCE VNC\nAfter=network.target\n[Service]\nUser=ubuntu\nEnvironment=DISPLAY=:0\nExecStart=/home/ubuntu/start-vnc.sh\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/xvnc.service'
   - systemctl enable xvnc.service
   - systemctl start xvnc.service
 """
 
-import os
 make_iso(os.environ['HOME'] + '/qemu/seed.iso', [
     ('meta-data', meta_data),
     ('user-data', user_data),
 ])
 PYEOF
+        python3 /tmp/make_seed.py
 
         if [ -s "$SEED_ISO" ]; then
-          echo "✅ Seed ISO created: $(ls -lh $SEED_ISO | awk '{print $5}')"
+          echo "Seed ISO created OK"
         else
-          echo "❌ Seed ISO creation failed!"
+          echo "Seed ISO failed!"
           exit 1
         fi
       else
@@ -326,16 +269,16 @@ PYEOF
       if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
         URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
         echo "========================================="
-        echo " 🐧 Ubuntu Server + XFCE ready:"
+        echo " Ubuntu Server + XFCE ready:"
         echo "     $URL/vnc.html"
         echo "     VNC Password: ubuntu"
         echo "     SSH: ssh -p 2222 ubuntu@localhost"
         echo "========================================="
         mkdir -p /home/user/vps
         echo "$URL/vnc.html" > /home/user/vps/noVNC-URL.txt
-        echo "✅ URL saved to ~/vps/noVNC-URL.txt"
+        echo "URL saved to ~/vps/noVNC-URL.txt"
       else
-        echo "❌ Cloudflared tunnel failed. Check /tmp/cloudflared.log"
+        echo "Cloudflared tunnel failed. Check /tmp/cloudflared.log"
       fi
 
       # =========================
@@ -343,7 +286,7 @@ PYEOF
       # =========================
       elapsed=0
       while true; do
-        echo "⏱️  Time elapsed: $elapsed min | QEMU: $(pgrep qemu-system > /dev/null && echo running || echo STOPPED)"
+        echo "Time elapsed: $elapsed min | QEMU: $(pgrep qemu-system > /dev/null && echo running || echo STOPPED)"
         ((elapsed++))
         sleep 60
       done
