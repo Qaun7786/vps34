@@ -20,13 +20,19 @@
       # One-time cleanup
       # =========================
       if [ ! -f /home/user/.cleanup_done ]; then
-        rm -rf /home/user/.gradle/* /home/user/.emu/* || true
+        echo "Cleaning up..."
+        rm -rf /home/user/.gradle/* || true
+        rm -rf /home/user/.emu/* || true
+        rm -rf /home/user/.android/* || true
         find /home/user -mindepth 1 -maxdepth 1 \
-          ! -name 'idx-linux-gui' \
+          ! -name 'vps' \
           ! -name '.cleanup_done' \
           ! -name '.*' \
           -exec rm -rf {} + || true
         touch /home/user/.cleanup_done
+        echo "Cleanup done."
+      else
+        echo "Cleanup already done, skipping."
       fi
 
       # =========================
@@ -231,6 +237,9 @@ PYEOF
         echo "     VNC Password: ubuntu"
         echo "     SSH: ssh -p 2222 ubuntu@localhost"
         echo "========================================="
+        mkdir -p /home/user/vps
+        echo "$URL/vnc.html" > /home/user/vps/noVNC-URL.txt
+        echo "✅ URL saved to ~/vps/noVNC-URL.txt"
       else
         echo "❌ Cloudflared tunnel failed. Check /tmp/cloudflared.log"
       fi
