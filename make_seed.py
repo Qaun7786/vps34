@@ -100,8 +100,8 @@ users:
 chpasswd:
   expire: false
   list:
-    - ubuntu:ubuntu
-ssh_pwauth: true
+    - ubuntu:
+ssh_pwauth: false
 package_update: true
 package_upgrade: false
 packages:
@@ -115,15 +115,49 @@ packages:
   - htop
   - nano
   - net-tools
+  - lightdm
+  - lightdm-gtk-greeter
+write_files:
+  - path: /etc/lightdm/lightdm.conf
+    content: |
+      [Seat:*]
+      autologin-user=ubuntu
+      autologin-user-timeout=0
+      user-session=xfce
+  - path: /home/ubuntu/.vnc/xstartup
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      export DISPLAY=:0
+      exec startxfce4
+  - path: /etc/systemd/system/xvnc.service
+    content: |
+      [Unit]
+      Description=Xvfb + XFCE + x11vnc
+      After=network.target
+      [Service]
+      User=ubuntu
+      Environment=DISPLAY=:0
+      ExecStart=/home/ubuntu/start-desktop.sh
+      Restart=on-failure
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+  - path: /home/ubuntu/start-desktop.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      pkill Xvfb || true
+      pkill x11vnc || true
+      sleep 1
+      Xvfb :0 -screen 0 1280x800x24 &
+      sleep 3
+      DISPLAY=:0 dbus-launch --exit-with-session startxfce4 &
+      sleep 5
+      x11vnc -display :0 -rfbport 5900 -nopw -forever -shared -bg -o /var/log/x11vnc.log
 runcmd:
   - passwd -d ubuntu
-  - mkdir -p /home/ubuntu/.vnc
-  - bash -c 'echo ubuntu | x11vnc -storepasswd ubuntu /home/ubuntu/.vnc/passwd'
-  - chown -R ubuntu:ubuntu /home/ubuntu/.vnc
-  - bash -c 'printf "#!/bin/bash\\nexport DISPLAY=:0\\nXvfb :0 -screen 0 1280x800x24 &\\nsleep 2\\nstartxfce4 &\\nsleep 3\\nx11vnc -display :0 -rfbport 5900 -passwd ubuntu -forever -shared -bg\\n" > /home/ubuntu/start-vnc.sh'
-  - chmod +x /home/ubuntu/start-vnc.sh
-  - chown ubuntu:ubuntu /home/ubuntu/start-vnc.sh
-  - bash -c 'printf "[Unit]\\nDescription=XFCE VNC\\nAfter=network.target\\n[Service]\\nUser=ubuntu\\nEnvironment=DISPLAY=:0\\nExecStart=/home/ubuntu/start-vnc.sh\\nRestart=on-failure\\n[Install]\\nWantedBy=multi-user.target\\n" > /etc/systemd/system/xvnc.service'
+  - chown -R ubuntu:ubuntu /home/ubuntu
   - systemctl enable xvnc.service
   - systemctl start xvnc.service
 """
