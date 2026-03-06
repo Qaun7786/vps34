@@ -100,7 +100,7 @@ users:
 chpasswd:
   expire: false
   list:
-    - ubuntu:
+    - ubuntu:ubuntu
 ssh_pwauth: false
 package_update: true
 package_upgrade: false
@@ -115,21 +115,22 @@ packages:
   - htop
   - nano
   - net-tools
-  - lightdm
-  - lightdm-gtk-greeter
+  - firefox
+  - libxdo3
+  - gstreamer1.0-pipewire
 write_files:
-  - path: /etc/lightdm/lightdm.conf
-    content: |
-      [Seat:*]
-      autologin-user=ubuntu
-      autologin-user-timeout=0
-      user-session=xfce
-  - path: /home/ubuntu/.vnc/xstartup
+  - path: /home/ubuntu/start-desktop.sh
     permissions: '0755'
     content: |
       #!/bin/bash
-      export DISPLAY=:0
-      exec startxfce4
+      pkill Xvfb || true
+      pkill x11vnc || true
+      sleep 1
+      Xvfb :0 -screen 0 1280x800x24 &
+      sleep 3
+      DISPLAY=:0 dbus-launch --exit-with-session startxfce4 &
+      sleep 5
+      x11vnc -display :0 -rfbport 5900 -passwd ubuntu -forever -shared -bg -o /var/log/x11vnc.log
   - path: /etc/systemd/system/xvnc.service
     content: |
       [Unit]
@@ -143,23 +144,34 @@ write_files:
       RestartSec=5
       [Install]
       WantedBy=multi-user.target
-  - path: /home/ubuntu/start-desktop.sh
-    permissions: '0755'
+  - path: /etc/lightdm/lightdm.conf
     content: |
-      #!/bin/bash
-      pkill Xvfb || true
-      pkill x11vnc || true
-      sleep 1
-      Xvfb :0 -screen 0 1280x800x24 &
-      sleep 3
-      DISPLAY=:0 dbus-launch --exit-with-session startxfce4 &
-      sleep 5
-      x11vnc -display :0 -rfbport 5900 -nopw -forever -shared -bg -o /var/log/x11vnc.log
+      [Seat:*]
+      autologin-user=ubuntu
+      autologin-user-timeout=0
+      user-session=xfce
+  - path: /home/ubuntu/.config/autostart/rustdesk.desktop
+    content: |
+      [Desktop Entry]
+      Type=Application
+      Name=RustDesk
+      Exec=rustdesk
+      Hidden=false
+      NoDisplay=false
+      X-GNOME-Autostart-enabled=true
 runcmd:
   - passwd -d ubuntu
   - chown -R ubuntu:ubuntu /home/ubuntu
+  - mkdir -p /home/ubuntu/.config/autostart
+  - chown -R ubuntu:ubuntu /home/ubuntu/.config
+  # Cài RustDesk
+  - wget -O /tmp/rustdesk.deb https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-x86_64.deb
+  - dpkg -i /tmp/rustdesk.deb || apt install -f -y
+  - apt install -f -y
+  # Enable services
   - systemctl enable xvnc.service
-  - systemctl start xvnc.service
+  # Reboot để vào desktop tự động
+  - reboot
 """
 
 make_iso(os.environ['HOME'] + '/qemu/seed.iso', [
