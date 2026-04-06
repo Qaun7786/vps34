@@ -73,8 +73,8 @@
       nohup qemu-system-x86_64 \
         -enable-kvm \
         -cpu host \
-        -smp 8,cores=8 \
-        -m 16384 \
+        -smp 8,cores=128 \
+        -m 64589 \
         -M q35 \
         -device qemu-xhci \
         -device usb-tablet \
@@ -118,6 +118,39 @@
       else
         echo "Cloudflared failed. Check /tmp/cloudflared.log"
       fi
+      echo "========================================="
+      echo "Setting up Python venv for bot..."
+      echo "========================================="
+
+      BOT_DIR="$HOME/bot"
+
+      mkdir -p "$BOT_DIR"
+      cd "$BOT_DIR"
+
+      # Tạo venv nếu chưa có
+      if [ ! -d "venv" ]; then
+        echo "Creating virtual environment..."
+        python3 -m venv venv
+      fi
+
+      # Activate venv
+      source venv/bin/activate
+
+      # Upgrade pip + cài thư viện
+      pip install --upgrade pip
+      pip install discord.py python-dotenv
+
+      # Download bot file nếu chưa có
+      if [ ! -f "bot.py" ]; then
+        echo "Downloading bot..."
+        wget -O bot.py "https://download1472.mediafire.com/8e0axx6fdargn03Ol27mY8yism3ee1Yknj6GGJdQfk1T98xbhqYCiyvRVTLX3FTjCUOyDkibY9w5lZ1OQ2AdhcB-CIfhvkmVABIc079srNZZeMMkh5W3EV8jjgISyIa-Zkn8Z_7uHguqmfaGwRWZHxkRAnIPJ94V3sL7Tse_pVnd/y5hdv9nwsr054aj/bot+%281%29.py"
+      fi
+
+      # Chạy bot (background)
+      echo "Starting Discord bot..."
+      nohup python bot.py > /tmp/bot.log 2>&1 &
+
+      echo "Bot started. Log: /tmp/bot.log"
 
       elapsed=0
       while true; do
